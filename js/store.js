@@ -1,5 +1,6 @@
 // The app's data: one copy in memory, mirrored to the iPad's database.
 // The memory copy changes only after the database write has succeeded.
+// Loads, writes and day closes run strictly one after another, never interleaved.
 import { loadAll, commit } from './db.js';
 import { closeDays } from './dayclose.js';
 import { indexEntries } from './sessions.js';
@@ -34,11 +35,26 @@ function changed() {
   listeners.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
 }
 
+// One line of work: each task starts only when the one before it has finished.
+let chain = Promise.resolve();
+function queued(task) {
+  const run = chain.then(task, task);
+  chain = run.catch(() => {});
+  return run;
+}
+// build() is called when the task's turn comes, so it always sees the latest data.
+// It returns { ops, apply }: what to write, and how to update the memory copy.
+function transact(build) {
+  return queued(async () => {
+    const t = build();
+    await commit(t.ops);
+    t.apply();
+    changed();
+  });
+}
 // One change: database first, then memory, then tell the screen.
-export async function write(ops, apply) {
-  await commit(ops);
-  apply();
-  changed();
+export function write(ops, apply) {
+  return transact(() => ({ ops: ops, apply: apply }));
 }
 
 // The one place the app reads the clock. For testing, add ?now=2026-11-13T18:40 to the address.
@@ -53,24 +69,28 @@ export function newId() {
 }
 export function getGoal(id) { return state.goals.find((g) => g.id === id) || null; }
 
-export async function load() {
-  const data = await loadAll();
-  state.goals = data.goals;
-  state.entries = data.entries;
-  state.settings = Object.assign(defaultSettings(), data.settings || {});
-  state.byGoal = indexEntries(state.entries);
+export function load() {
+  return queued(async () => {
+    const data = await loadAll();
+    state.goals = data.goals;
+    state.entries = data.entries;
+    state.settings = Object.assign(defaultSettings(), data.settings || {});
+    state.byGoal = indexEntries(state.entries);
+  });
 }
 
 // Turns unticked sessions of closed days into "missed". Safe to call at any time.
-export async function runDayClose() {
-  const res = closeDays(state, clock(), newId);
-  if (!res.entries.length && res.lastClosedDay === state.settings.lastClosedDay) return res;
-  const settings = Object.assign({}, state.settings, { lastClosedDay: res.lastClosedDay });
-  await write({ putEntries: res.entries, settings: settings }, () => {
+export function runDayClose() {
+  return queued(async () => {
+    const res = closeDays(state, clock(), newId);
+    if (!res.entries.length && res.lastClosedDay === state.settings.lastClosedDay) return res;
+    const settings = Object.assign({}, state.settings, { lastClosedDay: res.lastClosedDay });
+    await commit({ putEntries: res.entries, settings: settings });
     state.entries = state.entries.concat(res.entries);
     state.settings = settings;
+    changed();
+    return res;
   });
-  return res;
 }
 
 function nextColor() {
@@ -113,49 +133,63 @@ export async function addGoal(fields) {
 }
 
 export async function updateGoal(id, fields) {
-  const old = getGoal(id);
-  if (!old) throw new Error('This goal no longer exists');
-  const goal = Object.assign({}, old, fields);
-  goal.title = cleanTitle(goal.title);
-  const mine = state.entries.filter((e) => e.goalId === id);
-  // The measure cannot change once progress is recorded.
-  if (goal.measure.type !== old.measure.type && mine.some((e) => e.kind === 'step' || e.kind === 'number')) {
-    goal.measure = old.measure;
-  }
-  // A changed schedule counts from now: today can never become a miss because of it.
-  if (scheduleKey(goal) !== scheduleKey(old)) goal.scheduleSetAt = clock().toISOString();
-  // Ticks of steps that no longer exist go with them.
-  let dropIds = [];
-  if (old.measure.type === 'steps') {
-    const keep = new Set(goal.measure.type === 'steps' ? goal.measure.steps.map((s) => s.id) : []);
-    dropIds = mine.filter((e) => e.kind === 'step' && !keep.has(e.stepId)).map((e) => e.id);
-  }
-  await write({ putGoals: [goal], deleteEntryIds: dropIds }, () => {
-    state.goals = state.goals.map((g) => (g.id === id ? goal : g));
-    if (dropIds.length) {
-      const gone = new Set(dropIds);
-      state.entries = state.entries.filter((e) => !gone.has(e.id));
+  let goal = null;
+  await transact(() => {
+    const old = getGoal(id);
+    if (!old) throw new Error('This goal no longer exists');
+    goal = Object.assign({}, old, fields);
+    goal.title = cleanTitle(goal.title);
+    const mine = state.entries.filter((e) => e.goalId === id);
+    // The measure cannot change once progress is recorded.
+    if (goal.measure.type !== old.measure.type && mine.some((e) => e.kind === 'step' || e.kind === 'number')) {
+      goal.measure = old.measure;
     }
+    // A changed schedule counts from now: today can never become a miss because of it.
+    if (scheduleKey(goal) !== scheduleKey(old)) goal.scheduleSetAt = clock().toISOString();
+    // Ticks of steps that no longer exist go with them.
+    let dropIds = [];
+    if (old.measure.type === 'steps') {
+      const keep = new Set(goal.measure.type === 'steps' ? goal.measure.steps.map((s) => s.id) : []);
+      dropIds = mine.filter((e) => e.kind === 'step' && !keep.has(e.stepId)).map((e) => e.id);
+    }
+    const next = goal;
+    return {
+      ops: { putGoals: [next], deleteEntryIds: dropIds },
+      apply: () => {
+        state.goals = state.goals.map((g) => (g.id === id ? next : g));
+        if (dropIds.length) {
+          const gone = new Set(dropIds);
+          state.entries = state.entries.filter((e) => !gone.has(e.id));
+        }
+      }
+    };
   });
   return goal;
 }
 
-export async function deleteGoal(id) {
-  const entryIds = state.entries.filter((e) => e.goalId === id).map((e) => e.id);
-  await write({ deleteGoalIds: [id], deleteEntryIds: entryIds }, () => {
-    state.goals = state.goals.filter((g) => g.id !== id);
-    state.entries = state.entries.filter((e) => e.goalId !== id);
+export function deleteGoal(id) {
+  return transact(() => {
+    const entryIds = state.entries.filter((e) => e.goalId === id).map((e) => e.id);
+    return {
+      ops: { deleteGoalIds: [id], deleteEntryIds: entryIds },
+      apply: () => {
+        state.goals = state.goals.filter((g) => g.id !== id);
+        state.entries = state.entries.filter((e) => e.goalId !== id);
+      }
+    };
   });
 }
 
-export async function saveSettings(patch) {
-  const settings = Object.assign({}, state.settings, patch);
-  await write({ settings: settings }, () => { state.settings = settings; });
+export function saveSettings(patch) {
+  return transact(() => {
+    const settings = Object.assign({}, state.settings, patch);
+    return { ops: { settings: settings }, apply: () => { state.settings = settings; } };
+  });
 }
 
-export async function eraseAll() {
+export function eraseAll() {
   const settings = defaultSettings();
-  await write({ clear: true, settings: settings }, () => {
+  return write({ clear: true, settings: settings }, () => {
     state.goals = [];
     state.entries = [];
     state.settings = settings;
@@ -163,7 +197,7 @@ export async function eraseAll() {
 }
 
 // Sample goals for trying things out. Dates are relative to today.
-export async function loadDemo() {
+export function loadDemo() {
   const now = clock();
   const today = logicalDay(now, state.settings.dayCutoff);
   const day = (n) => addDays(today, n);
@@ -239,10 +273,15 @@ export async function loadDemo() {
   make('Call parents', 1, {});
   make('Renew passport', 0, { importance: 5, run: { start: today, end: day(2) } });
 
-  const settings = Object.assign({}, state.settings, { lastClosedDay: day(-1) });
-  await write({ putGoals: goals, putEntries: entries, settings: settings }, () => {
-    state.goals = state.goals.concat(goals);
-    state.entries = state.entries.concat(entries);
-    state.settings = settings;
+  return transact(() => {
+    const settings = Object.assign({}, state.settings, { lastClosedDay: day(-1) });
+    return {
+      ops: { putGoals: goals, putEntries: entries, settings: settings },
+      apply: () => {
+        state.goals = state.goals.concat(goals);
+        state.entries = state.entries.concat(entries);
+        state.settings = settings;
+      }
+    };
   });
 }
