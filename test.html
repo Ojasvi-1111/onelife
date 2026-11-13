@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OneLife self-test</title>
+<style>
+  body { margin: 0; padding: 24px; background: #17181B; color: #F3F5F8; font: 17px/1.4 "Avenir Next", -apple-system, sans-serif; }
+  h1 { font-weight: 200; font-size: 30px; margin: 0 0 12px; }
+  #summary { font-size: 22px; margin-bottom: 16px; }
+  .ok { color: #3DFF8A; }
+  .bad { color: #FF7C7C; }
+  li { margin: 4px 0; }
+  small { color: #9BA1AD; }
+</style>
+</head>
+<body>
+<h1>OneLife self-test</h1>
+<div id="summary">Running...</div>
+<ol id="list"></ol>
+<script>
+  function loadProblem(message) {
+    var s = document.getElementById('summary');
+    s.className = 'bad';
+    s.textContent = message;
+  }
+  window.addEventListener('error', function (e) {
+    loadProblem('A file failed to run: ' + (e.message || 'unknown error'));
+  });
+</script>
+<script type="module" src="js/tests.js"
+  onerror="loadProblem('A js file is missing. Check the six file names in the js folder.')"></script>
+</body>
+</html>
