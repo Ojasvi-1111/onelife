@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OneLife icon maker</title>
+<style>
+  body { margin: 0; padding: 24px; background: #17181B; color: #F3F5F8; font: 17px/1.4 "Avenir Next", -apple-system, sans-serif; }
+  h1 { font-weight: 200; font-size: 30px; margin: 0 0 6px; }
+  p { color: #9BA1AD; max-width: 40em; }
+  .row { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 20px; }
+  .item { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+  canvas { width: 180px; height: 180px; border-radius: 40px; }
+  button { font: inherit; color: #A6FFCB; background: transparent; border: 1px solid rgba(61, 255, 138, 0.5); border-radius: 3px; padding: 12px 16px; }
+  button:disabled { opacity: 0.4; }
+</style>
+</head>
+<body>
+<h1>OneLife icon maker</h1>
+<p>Tap each button and choose Save to Files. Keep the file names exactly as they are.</p>
+<div class="row" id="row"></div>
+<script>
+  var FILES = [
+    { name: 'apple-touch-icon.png', size: 180 },
+    { name: 'icon-192.png', size: 192 },
+    { name: 'icon-512.png', size: 512 }
+  ];
+  var GREEN = '#3DFF8A';
+  var CORE = '#E9FFF1';
+  var BG = '#17181B';
+  var FONT = '"Avenir Next", -apple-system, "Helvetica Neue", "Segoe UI", sans-serif';
+
+  // Draw one word, spread evenly to a fixed width.
+  function drawWord(ctx, text, centerX, baselineY, targetW) {
+    var widths = [];
+    var natural = 0;
+    var i;
+    for (i = 0; i < text.length; i++) {
+      widths[i] = ctx.measureText(text[i]).width;
+      natural += widths[i];
+    }
+    var track = text.length > 1 ? (targetW - natural) / (text.length - 1) : 0;
+    var x = centerX - targetW / 2;
+    for (i = 0; i < text.length; i++) {
+      ctx.fillText(text[i], x, baselineY);
+      x += widths[i] + track;
+    }
+  }
+
+  function drawIcon(canvas, size) {
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = BG;
+    ctx.fillRect(0, 0, size, size);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.font = '400 ' + (size * 0.30) + 'px ' + FONT;
+    var passes = [
+      { blur: 0.10, color: GREEN, alpha: 0.9 },
+      { blur: 0.04, color: GREEN, alpha: 1 },
+      { blur: 0.012, color: CORE, alpha: 1 }
+    ];
+    passes.forEach(function (p) {
+      ctx.shadowColor = GREEN;
+      ctx.shadowBlur = size * p.blur;
+      ctx.globalAlpha = p.alpha;
+      ctx.fillStyle = p.color;
+      drawWord(ctx, 'ONE', size / 2, size * 0.455, size * 0.60);
+      drawWord(ctx, 'LIFE', size / 2, size * 0.755, size * 0.60);
+    });
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  var row = document.getElementById('row');
+  FILES.forEach(function (f) {
+    var item = document.createElement('div');
+    item.className = 'item';
+    var canvas = document.createElement('canvas');
+    drawIcon(canvas, f.size);
+    var button = document.createElement('button');
+    button.textContent = 'Save ' + f.name;
+    button.disabled = true;
+    item.appendChild(canvas);
+    item.appendChild(button);
+    row.appendChild(item);
+    canvas.toBlob(function (blob) {
+      var file = new File([blob], f.name, { type: 'image/png' });
+      button.disabled = false;
+      button.addEventListener('click', function () {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file] }).catch(function () {});
+        } else {
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = f.name;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+      });
+    }, 'image/png');
+  });
+</script>
+</body>
+</html>
