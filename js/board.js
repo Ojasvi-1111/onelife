@@ -53,6 +53,13 @@ function progressOf(goal, ge) {
   return null;
 }
 
+// Is a session waiting to be ticked today?
+function isWaiting(goal, ge, c) {
+  if (goal.repeat.mode === 'days') return dayState(goal, ge, c.today, c.today, c.cutoff) === 'pending';
+  if (goal.repeat.mode === 'perWeek') return weeklyAvailable(goal, ge, c.today, c.cutoff);
+  return false;
+}
+
 // The one action the tick button performs, in order of priority.
 export function tickAction(goal, ge, c, u) {
   if (u.upcoming) return null;
@@ -161,12 +168,13 @@ export function goalView(goal, c) {
   const overdue = isOverdue(goal, ge, c.today, c.cutoff);
   const progress = progressOf(goal, ge);
   const rep = repeats(goal);
+  const waiting = isWaiting(goal, ge, c);
+  // A repeating goal dims to cool blue only when nothing is waiting, owed, overdue or complete.
   let look = 'normal';
   if (u.upcoming) look = 'upcoming';
   else if (overdue || u.owed.sessions > 0) look = 'missed';
-  else if (rep && u.T === 0) look = 'done';
-  const running = goal.repeat.mode === 'days' &&
-    dayState(goal, ge, c.today, c.today, c.cutoff) === 'pending' &&
+  else if (rep && !waiting && !u.complete && u.T === 0) look = 'done';
+  const running = goal.repeat.mode === 'days' && waiting &&
     slotPhase(goal, c.today, c.now, c.cutoff).phase === 'running';
   return {
     u: u,
@@ -182,11 +190,16 @@ export function goalView(goal, c) {
 }
 
 // ----- Fitting text: use the long form when it fits on one line, else the short form -----
+// Measured in the font that is really on screen, with a margin for the wider numbers.
 let measurer = null;
+let measureFamily = 'sans-serif';
 function textWidth(text, px) {
-  if (!measurer) measurer = document.createElement('canvas').getContext('2d');
-  measurer.font = '400 ' + px + 'px "Avenir Next", -apple-system, "Helvetica Neue", "Segoe UI", sans-serif';
-  return measurer.measureText(text).width * 1.1;
+  if (!measurer) {
+    measurer = document.createElement('canvas').getContext('2d');
+    measureFamily = getComputedStyle(document.body).fontFamily || 'sans-serif';
+  }
+  measurer.font = '400 ' + px + 'px ' + measureFamily;
+  return measurer.measureText(text).width * 1.15;
 }
 function fit(row, avail, w) {
   const px = Math.max(14, Math.min(18, 0.055 * w));
@@ -202,10 +215,10 @@ function boxInner(goal, v, w) {
   const hasTick = !!v.action;
   let mid = '';
   if (second) {
-    mid += '<div class="box-second' + (second.hot ? ' hot' : '') + '">' + nums(fit(second, w - 36, w)) + '</div>';
+    mid += '<div class="box-second' + (second.hot ? ' hot' : '') + '">' + nums(fit(second, w - 38, w)) + '</div>';
   }
   if (showProgress) {
-    mid += '<div class="box-progress"><span>' + nums(fit(v.progress, w - 80, w)) + '</span>' +
+    mid += '<div class="box-progress"><span>' + nums(fit(v.progress, w - 82, w)) + '</span>' +
       '<i class="box-bar"><b style="width:' + Math.round(v.progress.frac * 100) + '%"></b></i></div>';
   } else if (tier >= 2 && v.week && v.week.y > 0) {
     mid += '<div class="box-progress"><span>' + nums(v.week.x + ' of ' + v.week.y + ' this week') + '</span></div>';
@@ -218,7 +231,7 @@ function boxInner(goal, v, w) {
     (mid ? '<div class="box-mid">' + mid + '</div>' : '') +
     '<div class="box-foot">' +
       '<div class="box-status' + (first && first.hot ? ' hot' : '') + '">' +
-        (first ? nums(fit(first, w - 36 - (hasTick ? 44 : 0), w)) : '') +
+        (first ? nums(fit(first, w - 38 - (hasTick ? 44 : 0), w)) : '') +
       '</div>' +
       (hasTick
         ? '<button type="button" class="box-tick" aria-label="' + esc(v.action.label) + '"><span>' +
