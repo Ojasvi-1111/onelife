@@ -136,6 +136,25 @@ function pickSettings(raw) {
   return out;
 }
 
+// Handwriting: keep the strokes that are sound. Damaged ink is dropped, never the whole backup.
+function cleanInk(ink) {
+  if (!ink || typeof ink !== 'object' || !Array.isArray(ink.strokes)) return null;
+  const w = Number(ink.w);
+  const h = Number(ink.h);
+  if (!(w > 0) || !(h > 0)) return null;
+  const strokes = [];
+  let total = 0;
+  for (let i = 0; i < ink.strokes.length; i++) {
+    const s = ink.strokes[i];
+    if (!Array.isArray(s) || s.length < 2 || s.length % 2 !== 0) continue;
+    if (!s.every((v) => typeof v === 'number' && isFinite(v))) continue;
+    total += s.length;
+    if (total > 400000) break;
+    strokes.push(s.map((v) => Math.round(v)));
+  }
+  return strokes.length ? { w: w, h: h, strokes: strokes } : null;
+}
+
 function cleanRepeat(r, where, cutoff) {
   if (!r || r.mode === 'none') return { mode: 'none' };
   const minutes = r.sessionMinutes == null ? null : Math.round(Number(r.sessionMinutes));
@@ -224,7 +243,9 @@ function cleanGoal(g, i, cutoff, ids) {
     scheduleSetAt: isStamp(g.scheduleSetAt) ? g.scheduleSetAt : g.createdAt,
     run: { start: start, end: end },
     repeat: repeat,
-    measure: measure
+    measure: measure,
+    inkTitle: cleanInk(g.inkTitle),
+    inkNote: cleanInk(g.inkNote)
   };
 }
 
