@@ -1,30 +1,23 @@
-/* OneLife base styles: colours, page frame, header, bottom bar, toast. */
+/* OneLife base styles. Dark only: matte charcoal, neon green brand, sharp corners. */
 :root {
-  --bg: #F6F5F2;
-  --surface: #FFFFFF;
-  --text: #1C1C20;
-  --text-2: #5E5E69;
-  --line: rgba(20, 20, 30, 0.12);
-  --fill: rgba(20, 20, 30, 0.06);
-  --accent: #3D6FE8;
-  --red: #E5484D;
-  --red-text: #C62A2F;
-  --shadow: 0 8px 24px rgba(20, 20, 30, 0.10), 0 1px 3px rgba(20, 20, 30, 0.08);
-  --tint: 18%;
-  --c0: #4C7DF0; --c1: #1FA89A; --c2: #4FA657; --c3: #E0A21B;
-  --c4: #E8743B; --c5: #E0569B; --c6: #8B62E0; --c7: #6B7A90;
-}
-:root[data-theme="dark"] {
-  --bg: #141416;
-  --surface: #232327;
-  --text: #F2F2F5;
-  --text-2: #A7A7B2;
-  --line: rgba(255, 255, 255, 0.14);
-  --fill: rgba(255, 255, 255, 0.08);
-  --accent: #86A6FF;
-  --red-text: #FF8589;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
-  --tint: 30%;
+  color-scheme: dark;
+  --bg: #17181B;
+  --void: #09090B;
+  --panel: #202126;
+  --text: #F3F5F8;
+  --text-2: #9BA1AD;
+  --hair: rgba(255, 255, 255, 0.10);
+  --hair-2: rgba(255, 255, 255, 0.20);
+  --green: #3DFF8A;
+  --green-core: #E9FFF1;
+  --green-soft: #A6FFCB;
+  --red: #FF2B2B;
+  --red-text: #FF7C7C;
+  --radius: 3px;
+  --font: "Avenir Next", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
+  --font-num: "DIN Alternate", "Avenir Next Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --t0: #5B8DEF; --t1: #2DB5A8; --t2: #6DBB63; --t3: #E3B341;
+  --t4: #EC8A4F; --t5: #E26BA6; --t6: #9C7BEA; --t7: #8A97AB;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -32,7 +25,8 @@ html, body { margin: 0; height: 100%; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 17px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font: 400 17px/1.35 var(--font);
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: manipulation;
@@ -42,7 +36,7 @@ body {
 }
 button, input, textarea, select { font: inherit; color: inherit; }
 input, textarea { -webkit-user-select: text; user-select: text; }
-button { cursor: pointer; }
+button { cursor: pointer; -webkit-appearance: none; appearance: none; }
 
 #app {
   position: fixed;
@@ -57,20 +51,76 @@ button { cursor: pointer; }
 .icon { width: 22px; height: 22px; flex: none; }
 .icon-lg { width: 30px; height: 30px; }
 
-/* Header: app name, quote, status line */
+/* Numbers are always set in the heavy instrument face */
+.n {
+  font-family: var(--font-num);
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+/* Header: neon wordmark, quote, clock cluster */
 .header {
   flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 2px 24px;
-  padding: 14px 20px 10px;
+  gap: 10px 32px;
+  padding: 18px 26px 12px;
 }
 .brand { flex: 1 1 440px; min-width: 0; }
-.brand-name { font-size: 24px; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; }
-.brand-quote { margin-top: 3px; font-size: 17px; line-height: 1.3; color: var(--text-2); overflow-wrap: break-word; }
-.status-line { flex: none; padding-top: 5px; font-size: 15px; color: var(--text-2); white-space: nowrap; }
+.brand-name {
+  font-size: clamp(44px, 6.2vw, 68px);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: 0.03em;
+  color: var(--green-core);
+  text-shadow:
+    0 0 2px rgba(255, 255, 255, 0.9),
+    0 0 9px var(--green),
+    0 0 24px var(--green),
+    0 0 54px rgba(61, 255, 138, 0.55),
+    0 0 100px rgba(61, 255, 138, 0.28);
+  animation: sign-breathe 9s ease-in-out infinite;
+}
+@keyframes sign-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.84; }
+}
+.brand-quote {
+  margin-top: 12px;
+  max-width: 38em;
+  font-size: clamp(17px, 2vw, 21px);
+  line-height: 1.35;
+  color: var(--green-soft);
+  text-shadow: 0 0 12px rgba(61, 255, 138, 0.35);
+  overflow-wrap: break-word;
+}
+.cluster { flex: none; text-align: right; }
+.clock {
+  font-family: var(--font-num);
+  font-weight: 700;
+  font-size: 42px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.clock .ampm {
+  margin-left: 5px;
+  font-family: var(--font);
+  font-weight: 400;
+  font-size: 15px;
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+.cluster-date { margin-top: 6px; font-size: 15px; color: var(--text-2); }
+.cluster-score { margin-top: 2px; font-size: 15px; color: var(--text-2); }
+@media (max-width: 760px) {
+  .cluster { display: flex; align-items: baseline; gap: 14px; text-align: left; }
+  .clock { font-size: 30px; }
+  .cluster-date, .cluster-score { margin-top: 0; }
+}
 
 /* Board area */
 .board-wrap {
@@ -88,15 +138,15 @@ button { cursor: pointer; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 8px;
   padding: 24px;
   text-align: center;
   color: var(--text-2);
 }
-.empty-title { font-size: 22px; font-weight: 600; color: var(--text); }
+.empty-title { font-size: 30px; font-weight: 200; color: var(--text); }
 .empty-sub { font-size: 16px; }
 
-/* Bottom bar */
+/* Bottom bar: sharp neon-green controls */
 .bar {
   flex: none;
   height: calc(96px + env(safe-area-inset-bottom));
@@ -104,54 +154,52 @@ button { cursor: pointer; }
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.bar-inner {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 16px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  box-shadow: var(--shadow);
+  gap: 18px;
 }
 .bar-btn {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  min-width: 136px;
   min-height: 48px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 999px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, transparent);
+  border-radius: var(--radius);
   background: transparent;
+  color: var(--green-soft);
   font-size: 16px;
-  font-weight: 600;
+  letter-spacing: 0.02em;
 }
-.bar-btn:active { background: var(--fill); }
+.bar-btn:active { background: color-mix(in srgb, var(--green) 14%, transparent); }
 .add-btn {
   width: 64px;
   height: 64px;
   flex: none;
   display: grid;
   place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: var(--text);
-  color: var(--bg);
+  border: 1.5px solid var(--green);
+  border-radius: var(--radius);
+  background: var(--void);
+  color: var(--green-core);
+  box-shadow:
+    0 0 6px var(--green),
+    0 0 20px color-mix(in srgb, var(--green) 55%, transparent),
+    inset 0 0 12px color-mix(in srgb, var(--green) 25%, transparent);
 }
 .add-btn:active { transform: scale(0.95); }
 .dot {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: -4px;
+  right: -4px;
   width: 10px;
   height: 10px;
-  border-radius: 50%;
   background: var(--red);
+  box-shadow: 0 0 8px var(--red);
 }
 
-/* Toast and confetti layer */
+/* Toast */
 #toast {
   position: fixed;
   left: 50%;
@@ -161,30 +209,37 @@ button { cursor: pointer; }
   align-items: center;
   gap: 14px;
   max-width: min(92vw, 560px);
-  padding: 12px 18px;
-  border-radius: 14px;
-  background: var(--text);
-  color: var(--bg);
+  padding: 12px 16px;
+  border: 1px solid var(--hair-2);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
   font-size: 16px;
   opacity: 0;
   pointer-events: none;
-  transform: translateX(-50%) translateY(20px);
+  transform: translateX(-50%) translateY(16px);
   transition: opacity 0.2s, transform 0.2s;
 }
 #toast.show { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
 #toast button {
   border: 0;
   background: transparent;
-  color: inherit;
-  font-weight: 700;
-  text-decoration: underline;
+  color: var(--green-soft);
+  font-weight: 600;
   padding: 6px 4px;
 }
-#confetti {
-  position: fixed;
-  inset: 0;
-  z-index: 70;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
+
+/* Effects layer: the power surge */
+#fx { position: fixed; inset: 0; z-index: 70; pointer-events: none; overflow: hidden; }
+.surge {
+  position: absolute;
+  border: 2px solid var(--neon, #fff);
+  border-radius: 50%;
+  box-shadow: 0 0 14px var(--neon, #fff), inset 0 0 14px var(--neon, #fff);
+  transform: translate(-50%, -50%);
+}
+.surge-wash { position: absolute; inset: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-name { animation: none; }
 }
