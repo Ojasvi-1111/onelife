@@ -11,13 +11,20 @@ const CORE = [
   'js/done.js', 'js/settings.js',
   'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'
 ];
+let slowUntil = 0;   // while this is in the future, answer from the cache first
+
+// A redirected response cannot answer a page load, so rebuild it as a plain one.
+function tidy(res) {
+  if (!res.redirected) return res;
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers });
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
     await Promise.allSettled(CORE.map(async (url) => {
       const res = await fetch(url, { cache: 'no-cache' });
-      if (res.ok) await cache.put(url, res);
+      if (res.ok) await cache.put(url, tidy(res));
     }));
     await self.skipWaiting();
   })());
@@ -38,18 +45,31 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(networkFirst(req));
 });
 
+async function fromCache(cache, req) {
+  return (await cache.match(req.url, { ignoreSearch: true })) ||
+    (req.mode === 'navigate' ? await cache.match('index.html') : undefined);
+}
+
 async function networkFirst(req) {
   const cache = await caches.open(CACHE);
-  const network = fetch(req.url, { cache: 'no-cache' }).then((res) => {
+  const network = fetch(req.url, { cache: 'no-cache' }).then((raw) => {
+    const res = tidy(raw);
     if (res.ok) cache.put(req.url, res.clone()).catch(() => {});
     return res;
   });
-  const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 3000));
+
+  // On a slow connection, answer from the cache at once and refresh in the background.
+  if (Date.now() < slowUntil) {
+    const quick = await fromCache(cache, req);
+    if (quick) { network.catch(() => {}); return quick; }
+  }
+
+  const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), 3000));
   let res = null;
   try { res = await Promise.race([network, timeout]); } catch (err) { res = null; }
+  if (res === 'timeout') { slowUntil = Date.now() + 60000; res = null; }
   if (res && res.ok) return res;
-  const hit = (await cache.match(req.url, { ignoreSearch: true })) ||
-    (req.mode === 'navigate' ? await cache.match('index.html') : undefined);
+  const hit = await fromCache(cache, req);
   if (hit) { network.catch(() => {}); return hit; }
   return res || network;
 }
