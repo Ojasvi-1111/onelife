@@ -1,23 +1,26 @@
-// The goal form: one page for adding and editing a goal. A title alone is enough.
+// The goal form: one page for adding and editing a goal. A title alone is enough,
+// and the title and a note can also be written by hand.
 import { state, getGoal, addGoal, updateGoal, deleteGoal, todayDay, newId } from './store.js';
 import { addDays, slotValid, fmtTime } from './time.js';
 import { esc, toast, openSheet, closeSheet } from './ui.js';
 import { icon } from './icons.js';
+import { hasInk, inkSVG, openInkPad } from './ink.js';
 
 const ALL = [0, 1, 2, 3, 4, 5, 6];
 const ORDER = [1, 2, 3, 4, 5, 6, 0];   // Monday first
 const DAY_LETTER = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const DAY_NAME = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const HANDWRITTEN = 'Handwritten goal';
 
 function blank(today) {
   return {
-    id: null, title: '',
+    id: null, title: '', inkTitle: null,
     when: 'none', start: today, end: '',
     slot: 'none', timeStart: '07:00', timeEnd: '08:00', weekdays: [1, 2, 3, 4, 5],
     perDay: ALL.map((w) => ({ on: w >= 1 && w <= 5, start: '07:00', end: '08:00' })),
     flex: 'everyday', flexDays: [1, 3, 5], flexTimes: 3, flexMinutes: '',
     measure: 'check', steps: [], target: '', unit: '', startValue: '0',
-    importance: 3, color: null, notes: ''
+    importance: 3, color: null, notes: '', inkNote: null
   };
 }
 
@@ -25,7 +28,9 @@ function blank(today) {
 function fromGoal(goal, today) {
   const f = blank(today);
   f.id = goal.id;
-  f.title = goal.title;
+  f.inkTitle = hasInk(goal.inkTitle) ? goal.inkTitle : null;
+  f.inkNote = hasInk(goal.inkNote) ? goal.inkNote : null;
+  f.title = f.inkTitle && goal.title === HANDWRITTEN ? '' : goal.title;
   f.notes = goal.notes || '';
   f.importance = goal.importance;
   f.color = goal.color;
@@ -85,8 +90,9 @@ function fromGoal(goal, today) {
 // Check the form and build the fields of a goal. Returns { errors, fields }.
 function build(f, cutoff) {
   const errors = {};
-  const title = f.title.trim().slice(0, 80);
-  if (!title) errors.title = 'Give the goal a name.';
+  const inkTitle = hasInk(f.inkTitle) ? f.inkTitle : null;
+  const title = f.title.trim().slice(0, 80) || (inkTitle ? HANDWRITTEN : '');
+  if (!title) errors.title = 'Give the goal a name, typed or handwritten.';
 
   let run = { start: null, end: null };
   if (f.when === 'fixed') {
@@ -165,7 +171,8 @@ function build(f, cutoff) {
 
   const fields = {
     title: title, notes: f.notes.trim(), importance: f.importance,
-    run: run, repeat: repeat, measure: measure
+    run: run, repeat: repeat, measure: measure,
+    inkTitle: inkTitle, inkNote: hasInk(f.inkNote) ? f.inkNote : null
   };
   if (f.color !== null) fields.color = f.color;
   return { errors: errors, fields: fields };
@@ -288,9 +295,18 @@ function sectionsHTML(f, errors, locked, today) {
       '" data-set="color" data-val="' + i + '" style="--tag:var(--t' + i + ')" aria-label="Colour ' + (i + 1) + '"></button>'
     )).join('') + '</div></section>';
 
-  // Notes
+  // Notes, typed and handwritten
   h += '<section class="fsec"><div class="fsec-label">Notes</div>' +
-    '<textarea class="input area" data-k="notes" rows="3" maxlength="2000">' + esc(f.notes) + '</textarea></section>';
+    '<textarea class="input area" data-k="notes" rows="3" maxlength="2000">' + esc(f.notes) + '</textarea>' +
+    (hasInk(f.inkNote)
+      ? '<div class="ink-preview tall">' + inkSVG(f.inkNote, { label: 'Handwritten note' }) + '</div>' +
+        '<div class="ink-row">' +
+          '<button type="button" class="btn" data-ink="note">' + icon('edit') + '<span>Edit handwriting</span></button>' +
+          '<button type="button" class="btn" data-ink="note-remove">Remove handwriting</button>' +
+        '</div>'
+      : '<div class="ink-row"><button type="button" class="btn" data-ink="note">' + icon('edit') +
+        '<span>Write a note by hand</span></button></div>') +
+    '</section>';
 
   return h;
 }
@@ -318,7 +334,8 @@ export function openGoalForm(goalId) {
           '<input class="input input-title" id="f-title" type="text" maxlength="80" ' +
             'placeholder="What is the goal?" enterkeyhint="done">' +
           '<div class="field-error" id="f-title-error"></div>' +
-          (goal ? '' : '<div class="fnote">A name is enough. Everything below is optional.</div>') +
+          '<div id="f-ink-title"></div>' +
+          (goal ? '' : '<div class="fnote">A name is enough, typed or handwritten. Everything below is optional.</div>') +
         '</div>' +
         '<div class="form-body" id="f-body"></div>' +
         '<div class="form-foot">' +
@@ -334,21 +351,63 @@ export function openGoalForm(goalId) {
   const body = sheet.querySelector('#f-body');
   const titleInput = sheet.querySelector('#f-title');
   const titleError = sheet.querySelector('#f-title-error');
+  const inkTitleBox = sheet.querySelector('#f-ink-title');
   const saveButton = sheet.querySelector('#f-save');
+  const canSave = () => !!f.title.trim() || hasInk(f.inkTitle);
 
   const render = () => {
     body.innerHTML = sectionsHTML(f, errors, locked, today);
     titleError.textContent = errors.title || '';
   };
+  const renderInkTitle = () => {
+    inkTitleBox.innerHTML = hasInk(f.inkTitle)
+      ? '<div class="ink-preview">' + inkSVG(f.inkTitle, { label: 'Handwritten title' }) + '</div>' +
+        '<div class="ink-row">' +
+          '<button type="button" class="btn" data-ink="title">' + icon('edit') + '<span>Edit handwriting</span></button>' +
+          '<button type="button" class="btn" data-ink="title-remove">Remove handwriting</button>' +
+        '</div>'
+      : '<div class="ink-row"><button type="button" class="btn" data-ink="title">' + icon('edit') +
+        '<span>Write the title by hand</span></button></div>';
+    saveButton.disabled = !canSave();
+  };
+
+  // Handwriting: open the pad, or remove what was written.
+  const onInk = (what) => {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    if (what === 'title') {
+      openInkPad({
+        title: 'Goal title', hint: 'Write the goal here', w: 4, h: 1, ink: f.inkTitle,
+        onSave: (ink) => { f.inkTitle = ink; dirty = true; renderInkTitle(); }
+      });
+    } else if (what === 'title-remove') {
+      f.inkTitle = null;
+      dirty = true;
+      renderInkTitle();
+    } else if (what === 'note') {
+      openInkPad({
+        title: 'Handwritten note', hint: 'Write your note here', w: 4, h: 3, ink: f.inkNote,
+        onSave: (ink) => { f.inkNote = ink; dirty = true; render(); }
+      });
+    } else if (what === 'note-remove') {
+      f.inkNote = null;
+      dirty = true;
+      render();
+    }
+  };
+
   titleInput.value = f.title;
-  saveButton.disabled = !f.title.trim();
   render();
+  renderInkTitle();
   if (!goal) titleInput.focus();
 
   titleInput.addEventListener('input', () => {
     f.title = titleInput.value;
     dirty = true;
-    saveButton.disabled = !f.title.trim();
+    saveButton.disabled = !canSave();
+  });
+  inkTitleBox.addEventListener('click', (event) => {
+    const t = event.target.closest('[data-ink]');
+    if (t) onInk(t.dataset.ink);
   });
 
   const onField = (event) => {
@@ -374,6 +433,10 @@ export function openGoalForm(goalId) {
     const t = event.target.closest('button');
     if (!t || t.disabled) return;
     const d = t.dataset;
+    if (d.ink) {
+      onInk(d.ink);
+      return;
+    }
     let focusStep = -1;
     if (d.set) {
       const numeric = d.set === 'importance' || d.set === 'color' || d.set === 'flexTimes';
@@ -447,7 +510,7 @@ export function openGoalForm(goalId) {
       dirty = false;
       closeSheet(true);
     } catch (err) {
-      saveButton.disabled = false;
+      saveButton.disabled = !canSave();
       toast('Could not save. Try again.');
     }
   });
