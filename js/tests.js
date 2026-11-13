@@ -22,6 +22,7 @@ const CUT = '04:00';
 const NOW = new Date(2026, 10, 13, 18, 40, 0);   // Fri 13 Nov 2026, 18:40
 const TODAY = '2026-11-13';
 const ctx = { now: NOW, today: TODAY, cutoff: CUT };
+const at = (h, m) => ({ now: new Date(2026, 10, 13, h, m, 0), today: TODAY, cutoff: CUT });
 let seq = 0;
 const nid = () => 't' + (++seq);
 const iso = (y, m, d, hh, mm) => new Date(y, m - 1, d, hh, mm, 0).toISOString();
@@ -44,7 +45,17 @@ function entry(g, day, kind, extra) {
     extra
   );
 }
+const done = (g, day) => entry(g, day, 'done', { minutes: 60 });
 const gym = goal({ run: { start: '2026-11-01', end: null }, repeat: daily('19:00', '20:00') });
+const weekly = (d, end) => goal({
+  createdAt: iso(2026, 11, d, 8, 0), scheduleSetAt: iso(2026, 11, d, 8, 0),
+  run: { start: T.makeDay(2026, 11, d), end: end || null },
+  repeat: { mode: 'perWeek', times: 3, sessionMinutes: 30 }
+});
+const mon = weekly(9);
+const closeFrom = (goals, entries, last, now) => closeDays(
+  { goals: goals, entries: entries, settings: { dayCutoff: CUT, lastClosedDay: last } }, now, nid
+);
 
 // ----- Tests -----
 group('time', () => {
@@ -57,6 +68,11 @@ group('time', () => {
   eq('week starts on Monday', T.weekStart('2026-11-13'), '2026-11-09');
   eq('Sunday belongs to the same week', T.weekStart('2026-11-15'), '2026-11-09');
   eq('minutes as text', T.fmtMinutes(90), '1h 30m');
+  const oneAm = new Date(2026, 10, 14, 1, 0, 0);
+  eq('1 AM is 21 hours into the day', T.minutesIntoDay(oneAm, CUT), 1260);
+  const moment = T.momentOf(TODAY, 1260, CUT);
+  eq('a late moment falls on the next calendar date', T.dateToDay(moment), '2026-11-14');
+  eq('...at 1 AM', moment.getHours(), 1);
 });
 
 group('slots', () => {
@@ -80,18 +96,69 @@ group('scheduling', () => {
   const later = goal({ run: { start: '2026-11-20', end: null }, repeat: daily('07:00', '09:00') });
   eq('a goal starting later is upcoming', S.isUpcoming(later, TODAY, CUT), true);
   eq('an upcoming goal has no session today', S.isScheduled(later, TODAY, CUT), false);
+  const mwf = goal({
+    run: { start: '2026-11-01', end: null },
+    repeat: {
+      mode: 'days', sessionMinutes: null,
+      slots: [1, 3, 5].map((w) => ({ weekday: w, start: '18:00', end: '18:30' }))
+    }
+  });
+  eq('a Mon/Wed/Fri goal is scheduled on Friday', S.isScheduled(mwf, TODAY, CUT), true);
+  eq('...and not on Saturday', S.isScheduled(mwf, '2026-11-14', CUT), false);
+  eq('its next session is Monday', S.nextSession(mwf, TODAY, CUT).day, '2026-11-16');
+  const nightOwl = goal({
+    createdAt: iso(2026, 11, 13, 23, 30), scheduleSetAt: iso(2026, 11, 13, 23, 30),
+    run: { start: TODAY, end: null }, repeat: daily('23:00', '01:00')
+  });
+  eq('a slot still running at set-up is scheduled', S.isScheduled(nightOwl, TODAY, CUT), true);
+  const afterMidnight = goal({
+    createdAt: iso(2026, 11, 14, 0, 30), scheduleSetAt: iso(2026, 11, 14, 0, 30),
+    run: { start: TODAY, end: null }, repeat: daily('19:00', '20:00')
+  });
+  eq('created after midnight: the evening slot is already gone', S.isScheduled(afterMidnight, TODAY, CUT), false);
+  eq('...and it counts from the next day', S.isScheduled(afterMidnight, '2026-11-14', CUT), true);
+  const ended = goal({ run: { start: '2026-11-05', end: '2026-11-12' }, repeat: daily('07:00', '09:00') });
+  eq('no sessions after the end date', S.isScheduled(ended, TODAY, CUT), false);
+});
+
+group('phases of the day', () => {
+  near('gym four hours before: no pull yet', urgency(gym, [], at(15, 0)).S, 0);
+  near('gym 90 minutes before', urgency(gym, [], at(17, 30)).S, 0.5);
+  near('gym while the slot runs', urgency(gym, [], at(19, 30)).S, 1);
+  eq('phase while the slot runs', S.slotPhase(gym, TODAY, at(19, 30).now, CUT).phase, 'running');
+  near('gym after the slot, not ticked', urgency(gym, [], at(21, 0)).S, 0.85);
+  const oneAm = new Date(2026, 10, 14, 1, 0, 0);
+  eq('1 AM still belongs to Friday', T.logicalDay(oneAm, CUT), TODAY);
+  near('gym at 1 AM is still open, and late', urgency(gym, [], { now: oneAm, today: TODAY, cutoff: CUT }).S, 0.85);
+  const anyTime = goal({ run: { start: '2026-11-01', end: null }, repeat: daily(null, null, 10) });
+  near('an any-time goal at 4 PM', urgency(anyTime, [], at(16, 0)).S, 0.6);
+});
+
+group('skips', () => {
+  const ge = [
+    done(gym, '2026-11-09'), done(gym, '2026-11-10'), done(gym, '2026-11-11'), done(gym, '2026-11-12'),
+    entry(gym, TODAY, 'skipped')
+  ];
+  eq('skipped today: state', S.dayState(gym, ge, TODAY, TODAY, CUT), 'skipped');
+  near('skipped today: no pull', urgency(gym, ge, ctx).S, 0);
+  const line = S.weekLine(gym, ge, TODAY, CUT);
+  eq('a skip leaves the week line: done', line.x, 4);
+  eq('a skip leaves the week line: out of', line.y, 6);
+  const r = closeFrom([gym], [entry(gym, '2026-11-10', 'skipped')], '2026-11-09', NOW);
+  eq('a skipped day is never marked missed', r.entries.length, 2);
+  const skippedOne = [entry(mon, '2026-11-10', 'skipped')];
+  eq('a weekly skip lowers the target', S.weekInfo(mon, skippedOne, TODAY, CUT).required, 2);
 });
 
 group('day close', () => {
-  const settings = { dayCutoff: CUT, lastClosedDay: '2026-11-09' };
-  const r1 = closeDays({ goals: [gym], entries: [], settings: settings }, NOW, nid);
+  const r1 = closeFrom([gym], [], '2026-11-09', NOW);
   eq('three days closed', r1.closedDays.length, 3);
   eq('three missed entries', r1.entries.length, 3);
   eq('a missed entry carries the session minutes', r1.entries[0].minutes, 60);
   eq('marker moves to yesterday', r1.lastClosedDay, '2026-11-12');
-  const r2 = closeDays({ goals: [gym], entries: r1.entries, settings: settings }, NOW, nid);
+  const r2 = closeFrom([gym], r1.entries, '2026-11-09', NOW);
   eq('running it again adds nothing', r2.entries.length, 0);
-  const r3 = closeDays({ goals: [gym], entries: [], settings: { dayCutoff: CUT, lastClosedDay: null } }, NOW, nid);
+  const r3 = closeFrom([gym], [], null, NOW);
   eq('the first run closes nothing', r3.entries.length, 0);
   eq('the first run sets the marker', r3.lastClosedDay, '2026-11-12');
 
@@ -99,34 +166,49 @@ group('day close', () => {
     createdAt: iso(2026, 11, 13, 23, 0), scheduleSetAt: iso(2026, 11, 13, 23, 0),
     run: { start: TODAY, end: null }, repeat: daily(null, null, 10)
   });
-  const from12 = { dayCutoff: CUT, lastClosedDay: '2026-11-12' };
   eq('an any-time goal is pending on its set-up day', S.dayState(anyTime, [], TODAY, TODAY, CUT), 'pending');
-  const r4 = closeDays({ goals: [anyTime], entries: [], settings: from12 }, new Date(2026, 10, 14, 9, 0), nid);
+  const r4 = closeFrom([anyTime], [], '2026-11-12', new Date(2026, 10, 14, 9, 0));
   eq('no miss for the set-up day', r4.entries.length, 0);
-  const r5 = closeDays({ goals: [anyTime], entries: [], settings: from12 }, new Date(2026, 10, 15, 9, 0), nid);
+  const r5 = closeFrom([anyTime], [], '2026-11-12', new Date(2026, 10, 15, 9, 0));
   eq('a miss for the day after', r5.entries.length, 1);
-  eq('that miss carries the planned minutes', r5.entries[0].minutes, 10);
+  eq('that miss carries the planned minutes', r5.entries.length ? r5.entries[0].minutes : -1, 10);
+
+  const away = closeFrom([gym], [], '2026-10-13', NOW);
+  eq('a month away: thirty days closed', away.closedDays.length, 30);
+  eq('...with misses only after the set-up day', away.entries.length, 11);
+  const finished = goal({
+    status: 'finished', run: { start: '2026-11-01', end: null }, repeat: daily('19:00', '20:00')
+  });
+  eq('finished goals are ignored', closeFrom([finished], [], '2026-11-09', NOW).entries.length, 0);
 });
 
 group('weekly goals', () => {
-  const weekly = (d) => goal({
-    createdAt: iso(2026, 11, d, 8, 0), scheduleSetAt: iso(2026, 11, d, 8, 0),
-    run: { start: T.makeDay(2026, 11, d), end: null },
-    repeat: { mode: 'perWeek', times: 3, sessionMinutes: 30 }
-  });
-  const mon = weekly(9);
-  eq('created on Monday: 3 this week', S.weekInfo(mon, [], '2026-11-13', CUT).required, 3);
-  eq('created on Friday: 1 this week', S.weekInfo(weekly(13), [], '2026-11-13', CUT).required, 1);
+  eq('created on Monday: 3 this week', S.weekInfo(mon, [], TODAY, CUT).required, 3);
+  eq('created on Friday: 1 this week', S.weekInfo(weekly(13), [], TODAY, CUT).required, 1);
   eq('created on Sunday: none this week', S.weekInfo(weekly(15), [], '2026-11-15', CUT).required, 0);
   eq('a full later week: 3', S.weekInfo(mon, [], '2026-11-18', CUT).required, 3);
   const oneDone = [entry(mon, '2026-11-10', 'done', { minutes: 30 })];
   eq('weekly session available today', S.weeklyAvailable(mon, oneDone, TODAY, CUT), true);
-  const r = closeDays(
-    { goals: [mon], entries: oneDone, settings: { dayCutoff: CUT, lastClosedDay: '2026-11-14' } },
-    new Date(2026, 10, 16, 9, 0), nid
-  );
+  const r = closeFrom([mon], oneDone, '2026-11-14', new Date(2026, 10, 16, 9, 0));
   eq('week closes with 2 missed', r.entries.length, 2);
-  eq('weekly misses are dated Sunday', r.entries[0].day, '2026-11-15');
+  eq('weekly misses are dated Sunday', r.entries.length ? r.entries[0].day : '', '2026-11-15');
+
+  near('weekly, none done by Friday: S', urgency(mon, [], ctx).S, 0.85);
+  near('weekly, none done by Friday: Uq', urgency(mon, [], ctx).Uq, 0.75);
+  near('weekly, one done: S', urgency(mon, oneDone, ctx).S, 0.567);
+  const doneToday = [entry(mon, TODAY, 'done', { minutes: 30 })];
+  near('weekly, done today: S', urgency(mon, doneToday, ctx).S, 0);
+  const line = S.weekLine(mon, oneDone, TODAY, CUT);
+  eq('weekly line: done', line.x, 1);
+  eq('weekly line: out of', line.y, 3);
+
+  const endsWed = weekly(9, '2026-11-11');
+  eq('ends on Wednesday: 1 required', S.weekInfo(endsWed, [], '2026-11-11', CUT).required, 1);
+  const c1 = closeFrom([endsWed], [], '2026-11-10', new Date(2026, 10, 12, 9, 0));
+  eq('the week closes at the end date', c1.entries.length, 1);
+  eq('...and the miss is dated that day', c1.entries.length ? c1.entries[0].day : '', '2026-11-11');
+  const c2 = closeFrom([endsWed], c1.entries, '2026-11-14', new Date(2026, 10, 16, 9, 0));
+  eq('...and not again on Sunday', c2.entries.length, 0);
 });
 
 group('owed and rates', () => {
@@ -134,20 +216,65 @@ group('owed and rates', () => {
   const m1 = entry(gym, '2026-11-10', 'missed', { minutes: 60 });
   const ge = [
     m0,
-    entry(gym, '2026-11-09', 'done', { minutes: 60 }),
+    done(gym, '2026-11-09'),
     m1,
     entry(gym, '2026-11-11', 'makeup', { minutes: 60, clearsEntryId: m1.id }),
-    entry(gym, '2026-11-11', 'done', { minutes: 60 }),
-    entry(gym, '2026-11-12', 'done', { minutes: 60 })
+    done(gym, '2026-11-11'),
+    done(gym, '2026-11-12')
   ];
   const ow = S.owed(ge);
   eq('one session owed', ow.sessions, 1);
   eq('sixty minutes owed', ow.minutes, 60);
-  eq('the oldest owed day', ow.list[0].day, '2026-11-08');
+  eq('the oldest owed day', ow.list.length ? ow.list[0].day : '', '2026-11-08');
   const line = S.weekLine(gym, ge, TODAY, CUT);
   eq('week line: done so far', line.x, 4);
   eq('week line: out of', line.y, 7);
   eq('30-day rate', S.rate30(ge, TODAY), 80);
+  const early = goal({ run: { start: '2026-11-01', end: null }, repeat: daily('07:00', '08:00') });
+  const score = S.todayScore([gym, early, mon], S.indexEntries([done(early, TODAY)]), TODAY, CUT);
+  eq('today score: done', score.done, 1);
+  eq('today score: out of', score.total, 2);
+});
+
+group('steps, numbers and pace', () => {
+  const paced = goal({
+    run: { start: '2026-11-01', end: '2026-11-30' },
+    measure: { type: 'number', target: 30, unit: 'km', startValue: 0 }
+  });
+  const p = urgency(paced, [entry(paced, '2026-11-10', 'number', { value: 6 })], ctx);
+  near('behind pace: P', p.P, 0.4);
+  near('behind pace: D', p.D, 0.15);
+  near('behind pace: U', p.U, 0.43);
+  const headStart = goal({
+    createdAt: iso(2026, 11, 13, 8, 0), scheduleSetAt: iso(2026, 11, 13, 8, 0),
+    run: { start: '2026-01-01', end: '2026-12-31' },
+    measure: { type: 'number', target: 20, unit: 'books', startValue: 12 }
+  });
+  const h = urgency(headStart, [], ctx);
+  near('created mid-run with a head start: not behind', h.P, 0);
+  near('...and the deadline is far away', h.D, 0.0588);
+  const project = goal({
+    measure: {
+      type: 'steps',
+      steps: [{ id: 's1', text: 'a' }, { id: 's2', text: 'b' }, { id: 's3', text: 'c' }, { id: 's4', text: 'd' }]
+    }
+  });
+  const one = [entry(project, TODAY, 'step', { stepId: 's1' })];
+  const next = S.nextStep(project, one);
+  eq('one step ticked', S.stepsDone(project, one), 1);
+  eq('the next step is the second', next ? next.id : '', 's2');
+  near('a quarter done', S.measureFraction(project, one), 0.25);
+  eq('not finished yet', S.measureMet(project, one), false);
+  const books = goal({ measure: { type: 'number', target: 20, unit: 'books', startValue: 12 } });
+  const reads = [
+    entry(books, '2026-11-05', 'number', { value: 3 }),
+    entry(books, '2026-11-06', 'number', { value: -1 })
+  ];
+  eq('a number adds up from its starting value', S.numberCurrent(books, reads), 14);
+  const allRead = [entry(books, TODAY, 'number', { value: 8 })];
+  eq('a number at its target is complete', S.isComplete(books, allRead, TODAY, CUT), true);
+  const later = goal({ importance: 5, run: { start: '2026-11-20', end: null }, repeat: daily('07:00', '09:00') });
+  near('an upcoming goal: only importance counts', urgency(later, [], ctx).U, 0.3);
 });
 
 group('urgency', () => {
@@ -155,7 +282,7 @@ group('urgency', () => {
   near('gym at 18:40: S', a.S, 0.889);
   near('gym at 18:40: U', a.U, 0.772);
   near('gym at 18:40: Uq', a.Uq, 0.75);
-  const b = urgency(gym, [entry(gym, TODAY, 'done', { minutes: 60 })], ctx);
+  const b = urgency(gym, [done(gym, TODAY)], ctx);
   near('gym after the tick: U', b.U, 0.15);
   const oneOff = goal({ importance: 5, run: { start: TODAY, end: '2026-11-15' } });
   const c = urgency(oneOff, [], ctx);
@@ -165,10 +292,7 @@ group('urgency', () => {
   near('title only, importance 1', urgency(goal({ importance: 1 }), [], ctx).U, 0);
   near('title only, importance 3', urgency(goal({ importance: 3 }), [], ctx).U, 0.15);
   near('title only, importance 5', urgency(goal({ importance: 5 }), [], ctx).U, 0.3);
-  const owing = [
-    entry(gym, TODAY, 'done', { minutes: 60 }),
-    entry(gym, '2026-11-12', 'missed', { minutes: 60 })
-  ];
+  const owing = [done(gym, TODAY), entry(gym, '2026-11-12', 'missed', { minutes: 60 })];
   const d = urgency(gym, owing, ctx);
   near('one session owed: P', d.P, 0.7);
   near('one session owed: U', d.U, 0.64);
@@ -238,6 +362,20 @@ group('layout', () => {
   eq('40 goals: none below the floor', jb.small, false);
   eq('40 goals: the board scrolls', b.scroll, true);
   eq('40 goals: the most urgent is on the first screen', !!top && top.y + top.h <= 620, true);
+
+  const none = layout([], opts);
+  eq('no goals: nothing placed', none.boxes.size, 0);
+  eq('no goals: no scrolling', none.scroll, false);
+  const solo = layout(make(1, () => 1), opts).boxes.get('b00');
+  eq('one urgent goal: full width', solo ? solo.w : -1, 420);
+  eq('one urgent goal: centred across', solo ? solo.x : -1, 380);
+  eq('one urgent goal: centred down', solo ? solo.y : -1, 170);
+  const twelve = make(12, (i) => [1, 0.8, 0.6, 0.5, 0.4, 0.3, 0.25, 0.2, 0.1, 0.05, 0, 0][i]);
+  const jp = judge(layout(twelve, { boardW: 834, visibleH: 900, minW: 180 }), 834, 180);
+  eq('portrait: no overlap', jp.overlap, false);
+  eq('portrait: inside the board', jp.outside, false);
+  const big = layout(make(15, (i) => (i % 4) * 0.25), { boardW: 1180, visibleH: 620, minW: 208 });
+  eq('largest floor setting: none below it', judge(big, 1180, 208).small, false);
 });
 
 // ----- Report -----
