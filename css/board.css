@@ -1,5 +1,8 @@
 /* Goal boxes: a neon outline around black. Colour and glow follow urgency. */
+[hidden] { display: none !important; }
+
 .board { position: relative; width: 100%; min-height: 100%; }
+.board.no-anim .box { transition: none; }
 
 .box {
   position: absolute;
@@ -11,7 +14,7 @@
   --lit-hi: 0.7;
   --breath: 6s;
   --tag: var(--t7);
-  transition: transform 0.5s ease-in-out, width 0.5s ease-in-out, height 0.5s ease-in-out;
+  transition: transform 0.5s ease-in-out, width 0.5s ease-in-out, height 0.5s ease-in-out, opacity 0.4s;
 }
 .box-body {
   position: absolute;
@@ -19,6 +22,7 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  gap: 4px;
   padding: 12px 14px 12px 22px;
   border: 1.5px solid var(--neon);
   border-radius: var(--radius);
@@ -79,6 +83,31 @@
   .box-title { font-weight: 200; letter-spacing: 0.01em; }
 }
 
+/* Middle: second status, progress, seven-day strip */
+.box-mid { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.box-second, .box-progress, .box-status {
+  font-size: clamp(14px, 5.5cqw, 18px);
+  line-height: 1.25;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.box-second .n, .box-progress .n, .box-status .n { font-size: 1.12em; }
+.box-second.hot, .box-second.hot .n, .box-status.hot, .box-status.hot .n { color: var(--red-text); }
+.box-progress { display: flex; align-items: center; gap: 10px; }
+.box-progress span { flex: none; }
+.box-bar { position: relative; flex: 1 1 auto; min-width: 20px; height: 3px; background: var(--hair-2); }
+.box-bar b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--neon); box-shadow: 0 0 6px var(--neon); }
+.box-strip { display: flex; gap: 5px; }
+.box-strip i { width: 9px; height: 9px; border: 1px solid transparent; }
+.box-strip .d-done { background: var(--text); }
+.box-strip .d-madeup { background: var(--text); border-color: var(--red-text); }
+.box-strip .d-missed { background: var(--red); }
+.box-strip .d-skipped { border-color: var(--text-2); }
+.box-strip .d-pending { border-color: var(--text); }
+.box-strip .d-none { background: var(--hair); }
+
 .box-foot {
   display: flex;
   align-items: flex-end;
@@ -86,15 +115,7 @@
   gap: 8px;
   min-height: 28px;
 }
-.box-status {
-  min-width: 0;
-  font-size: clamp(14px, 5.5cqw, 18px);
-  line-height: 1.25;
-  color: var(--text-2);
-  white-space: nowrap;
-}
-.box-status .n { font-size: 1.12em; }
-.box-status.hot, .box-status.hot .n { color: var(--red-text); }
+.box-status { min-width: 0; }
 
 /* Tick control: a small sharp square in the box's heat colour */
 .box-tick {
@@ -128,6 +149,11 @@
 .box.is-missed .box-body { border-width: 2px; }
 .box.is-upcoming .box-body { border-style: dashed; box-shadow: none; }
 .box.is-upcoming .box-body::before { display: none; }
+.box.is-running .box-tick span { animation: live 1.6s ease-in-out infinite; }
+@keyframes live {
+  0%, 100% { box-shadow: 0 0 6px color-mix(in srgb, var(--neon) 60%, transparent); }
+  50% { box-shadow: 0 0 16px var(--neon); }
+}
 
 /* Power surge: the box flashes white-hot for a moment */
 .box.flash .box-body {
@@ -143,4 +169,5 @@
 @media (prefers-reduced-motion: reduce) {
   .box-body { animation: none; }
   .box-body::before { animation: none; opacity: var(--lit-hi); }
+  .box.is-running .box-tick span { animation: none; }
 }
