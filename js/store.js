@@ -34,6 +34,13 @@ function changed() {
   listeners.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
 }
 
+// One change: database first, then memory, then tell the screen.
+export async function write(ops, apply) {
+  await commit(ops);
+  apply();
+  changed();
+}
+
 // The one place the app reads the clock. For testing, add ?now=2026-11-13T18:40 to the address.
 const forced = new URLSearchParams(location.search).get('now');
 const clockOffset = forced && !isNaN(Date.parse(forced)) ? Date.parse(forced) - Date.now() : 0;
@@ -59,10 +66,10 @@ export async function runDayClose() {
   const res = closeDays(state, clock(), newId);
   if (!res.entries.length && res.lastClosedDay === state.settings.lastClosedDay) return res;
   const settings = Object.assign({}, state.settings, { lastClosedDay: res.lastClosedDay });
-  await commit({ putEntries: res.entries, settings: settings });
-  state.entries = state.entries.concat(res.entries);
-  state.settings = settings;
-  changed();
+  await write({ putEntries: res.entries, settings: settings }, () => {
+    state.entries = state.entries.concat(res.entries);
+    state.settings = settings;
+  });
   return res;
 }
 
@@ -74,6 +81,25 @@ function nextColor() {
   return best;
 }
 
+function cleanTitle(title) {
+  const t = String(title == null ? '' : title).trim().slice(0, 80);
+  if (!t) throw new Error('A goal needs a title');
+  return t;
+}
+
+// The parts of a goal that decide when its sessions happen.
+function scheduleKey(goal) {
+  const r = goal.repeat;
+  let rep = r.mode;
+  if (r.mode === 'perWeek') rep += '|' + r.times + '|' + (r.sessionMinutes || '');
+  if (r.mode === 'days') {
+    rep += '|' + (r.sessionMinutes || '') + '|' + r.slots.slice()
+      .sort((a, b) => a.weekday - b.weekday)
+      .map((s) => s.weekday + ':' + (s.start || '') + '-' + (s.end || '')).join(',');
+  }
+  return (goal.run.start || '') + '|' + (goal.run.end || '') + '|' + rep;
+}
+
 export async function addGoal(fields) {
   const stamp = clock().toISOString();
   const goal = Object.assign({
@@ -81,28 +107,59 @@ export async function addGoal(fields) {
     createdAt: stamp, finishedAt: null, scheduleSetAt: stamp,
     run: { start: null, end: null }, repeat: { mode: 'none' }, measure: { type: 'check' }
   }, fields);
-  goal.title = String(goal.title).trim().slice(0, 80);
-  if (!goal.title) throw new Error('A goal needs a title');
-  await commit({ putGoals: [goal] });
-  state.goals = state.goals.concat([goal]);
-  changed();
+  goal.title = cleanTitle(goal.title);
+  await write({ putGoals: [goal] }, () => { state.goals = state.goals.concat([goal]); });
   return goal;
+}
+
+export async function updateGoal(id, fields) {
+  const old = getGoal(id);
+  if (!old) throw new Error('This goal no longer exists');
+  const goal = Object.assign({}, old, fields);
+  goal.title = cleanTitle(goal.title);
+  const mine = state.entries.filter((e) => e.goalId === id);
+  // The measure cannot change once progress is recorded.
+  if (goal.measure.type !== old.measure.type && mine.some((e) => e.kind === 'step' || e.kind === 'number')) {
+    goal.measure = old.measure;
+  }
+  // A changed schedule counts from now: today can never become a miss because of it.
+  if (scheduleKey(goal) !== scheduleKey(old)) goal.scheduleSetAt = clock().toISOString();
+  // Ticks of steps that no longer exist go with them.
+  let dropIds = [];
+  if (old.measure.type === 'steps') {
+    const keep = new Set(goal.measure.type === 'steps' ? goal.measure.steps.map((s) => s.id) : []);
+    dropIds = mine.filter((e) => e.kind === 'step' && !keep.has(e.stepId)).map((e) => e.id);
+  }
+  await write({ putGoals: [goal], deleteEntryIds: dropIds }, () => {
+    state.goals = state.goals.map((g) => (g.id === id ? goal : g));
+    if (dropIds.length) {
+      const gone = new Set(dropIds);
+      state.entries = state.entries.filter((e) => !gone.has(e.id));
+    }
+  });
+  return goal;
+}
+
+export async function deleteGoal(id) {
+  const entryIds = state.entries.filter((e) => e.goalId === id).map((e) => e.id);
+  await write({ deleteGoalIds: [id], deleteEntryIds: entryIds }, () => {
+    state.goals = state.goals.filter((g) => g.id !== id);
+    state.entries = state.entries.filter((e) => e.goalId !== id);
+  });
 }
 
 export async function saveSettings(patch) {
   const settings = Object.assign({}, state.settings, patch);
-  await commit({ settings: settings });
-  state.settings = settings;
-  changed();
+  await write({ settings: settings }, () => { state.settings = settings; });
 }
 
 export async function eraseAll() {
   const settings = defaultSettings();
-  await commit({ clear: true, settings: settings });
-  state.goals = [];
-  state.entries = [];
-  state.settings = settings;
-  changed();
+  await write({ clear: true, settings: settings }, () => {
+    state.goals = [];
+    state.entries = [];
+    state.settings = settings;
+  });
 }
 
 // Sample goals for trying things out. Dates are relative to today.
@@ -183,9 +240,9 @@ export async function loadDemo() {
   make('Renew passport', 0, { importance: 5, run: { start: today, end: day(2) } });
 
   const settings = Object.assign({}, state.settings, { lastClosedDay: day(-1) });
-  await commit({ putGoals: goals, putEntries: entries, settings: settings });
-  state.goals = state.goals.concat(goals);
-  state.entries = state.entries.concat(entries);
-  state.settings = settings;
-  changed();
+  await write({ putGoals: goals, putEntries: entries, settings: settings }, () => {
+    state.goals = state.goals.concat(goals);
+    state.entries = state.entries.concat(entries);
+    state.settings = settings;
+  });
 }
