@@ -5,6 +5,7 @@ import { reopenGoal, totalsOf } from './actions.js';
 import { act } from './celebrate.js';
 import { esc, nums, openSheet, closeSheet, toast } from './ui.js';
 import { icon } from './icons.js';
+import { hasInk, inkSVG } from './ink.js';
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 const monthFormat = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' });
@@ -40,12 +41,20 @@ function winText(goal, e) {
   }
   return '';
 }
+// A goal's name in a list row: handwriting when it has it, otherwise the typed name.
+function rowTitle(goal) {
+  if (goal && hasInk(goal.inkTitle)) {
+    return '<span class="win-title" style="flex:0 0 150px;height:30px;color:var(--text)">' +
+      inkSVG(goal.inkTitle, { label: goal.title, stroke: 1.8 }) + '</span>';
+  }
+  return '<span class="win-title">' + esc(goal ? goal.title : 'Deleted goal') + '</span>';
+}
 function winRow(goals, e) {
   const goal = goals.get(e.goalId) || null;
   return '<div class="win">' +
     '<span class="win-time">' + nums(timeFormat.format(new Date(e.at))) + '</span>' +
     '<i class="tagdot" style="--tag:var(--t' + (goal ? goal.color % 8 : 7) + ')"></i>' +
-    '<span class="win-title">' + esc(goal ? goal.title : 'Deleted goal') + '</span>' +
+    rowTitle(goal) +
     '<span class="win-what">' + nums(winText(goal, e)) + '</span>' +
     '</div>';
 }
@@ -58,6 +67,16 @@ function dayHead(day, list) {
     (minutes ? '<span>' + nums(fmtMinutes(minutes)) + '</span>' : '') + '</div>';
 }
 
+// The name on a neon sign: handwriting glows in the sign's colour.
+function signTitle(goal) {
+  if (hasInk(goal.inkTitle)) {
+    return '<span class="sign-title" style="display:block;width:260px;max-width:100%;height:68px;color:#fff;' +
+      'filter:drop-shadow(0 0 6px var(--sign))">' +
+      inkSVG(goal.inkTitle, { label: goal.title, stroke: 2.6 }) + '</span>';
+  }
+  return '<span class="sign-title">' + esc(goal.title) + '</span>';
+}
+
 function wallHTML() {
   const cutoff = state.settings.dayCutoff;
   const finished = state.goals.filter((g) => g.status === 'finished')
@@ -68,7 +87,7 @@ function wallHTML() {
     const totals = totalsOf(g);
     return '<button type="button" class="sign" data-d="sign" data-id="' + esc(g.id) +
       '" style="--sign:var(--s' + (g.color % 8) + ')">' +
-      '<span class="sign-title">' + esc(g.title) + '</span>' +
+      signTitle(g) +
       '<span class="sign-meta">' + nums('Finished ' + fmtDay(when, { day: 'numeric', month: 'short', year: 'numeric' })) + '</span>' +
       (totals.length
         ? '<span class="sign-totals">' + totals.map((t) => '<span>' + nums(t) + '</span>').join('') + '</span>'
@@ -142,10 +161,14 @@ function doneHTML(ui) {
 // A finished goal's sign: its totals, with Reopen and Delete.
 function openSign(goal) {
   const totals = totalsOf(goal);
+  const title = hasInk(goal.inkTitle)
+    ? '<div class="detail-title" style="height:76px">' +
+      inkSVG(goal.inkTitle, { label: goal.title, stroke: 2.6 }) + '</div>'
+    : '<div class="detail-title">' + esc(goal.title) + '</div>';
   const sheet = openSheet({
     html:
       '<div class="sheet-title">Finished goal</div>' +
-      '<div class="detail-title">' + esc(goal.title) + '</div>' +
+      title +
       (totals.length
         ? '<div class="finish-totals" style="justify-content:flex-start">' +
           totals.map((t) => '<span>' + nums(t) + '</span>').join('') + '</div>'
