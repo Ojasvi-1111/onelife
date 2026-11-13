@@ -1,13 +1,20 @@
-// OneLife: start-up and wiring. Stage 4.
-import { load, runDayClose, loadDemo, eraseAll, subscribe } from './store.js';
+// OneLife: start-up, screens and wiring.
+import { state, load, runDayClose, subscribe, saveSettings } from './store.js';
 import { mountBoard, refreshBoard } from './board.js';
 import { openGoalForm } from './form.js';
 import { openGoalDetail } from './detail.js';
 import { performTick, excuseEntries } from './actions.js';
 import { act, unlockAudio } from './celebrate.js';
+import { backupDue } from './backup.js';
+import { mountSettings } from './settings.js';
 import { toast, openSheet, closeSheet, sheetOpen, esc } from './ui.js';
 
 const app = document.getElementById('app');
+const screen = document.createElement('div');
+screen.id = 'screen';
+screen.hidden = true;
+document.body.insertBefore(screen, document.getElementById('sheet-root'));
+let leave = null;   // cleans up the screen that is open
 
 function showFatal(err) {
   app.innerHTML =
@@ -19,6 +26,80 @@ function showFatal(err) {
   document.getElementById('retry').addEventListener('click', () => location.reload());
 }
 
+// ----- Motion, backup dot, keep awake -----
+let idle = false;
+let idleTimer = 0;
+function updateChrome() {
+  const motion = state.settings.motion;
+  document.body.classList.toggle('motion-off', motion === 'off');
+  document.body.classList.toggle('motion-calm', motion === 'calm' || (motion === 'full' && idle));
+  const button = document.querySelector('.bar-btn[data-act="settings"]');
+  if (button) {
+    const dot = button.querySelector('.dot');
+    const due = backupDue();
+    if (due && !dot) {
+      const el = document.createElement('i');
+      el.className = 'dot';
+      button.appendChild(el);
+    } else if (!due && dot) {
+      dot.remove();
+    }
+  }
+}
+// After three minutes without a touch, the boxes drift more calmly.
+function touched() {
+  if (idle) {
+    idle = false;
+    updateChrome();
+  }
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { idle = true; updateChrome(); }, 180000);
+}
+
+let wakeLock = null;
+async function syncWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  const want = state.settings.keepAwake && !document.hidden;
+  try {
+    if (want && !wakeLock) {
+      const lock = await navigator.wakeLock.request('screen');
+      wakeLock = lock;
+      lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+    } else if (!want && wakeLock) {
+      const lock = wakeLock;
+      wakeLock = null;
+      await lock.release();
+    }
+  } catch (err) {
+    wakeLock = null;
+  }
+}
+
+// ----- Screens -----
+function showBoard() {
+  if (leave) { leave(); leave = null; }
+  closeSheet(true);
+  screen.hidden = true;
+  screen.innerHTML = '';
+  app.hidden = false;
+  refreshBoard();
+  updateChrome();
+}
+function openScreen(mount) {
+  if (leave) { leave(); leave = null; }
+  closeSheet(true);
+  app.hidden = true;
+  screen.hidden = false;
+  leave = mount(screen, { onBack: showBoard });
+}
+function showSettings() { openScreen(mountSettings); }
+function showDone() {
+  import('./done.js')
+    .then((m) => openScreen(m.mountDone))
+    .catch(() => toast('The Done screen arrives in the next step.'));
+}
+
+// ----- Ticks -----
 // One tap, one action: ignore further ticks on the same goal for half a second.
 const busy = new Set();
 function onTick(id, action, el) {
@@ -50,47 +131,34 @@ function awayPrompt(res) {
   });
 }
 
-// Temporary tools behind the Settings button, until the real Settings screen exists.
-function openTools() {
-  const sheet = openSheet({
-    html:
-      '<div class="sheet-title">Tools for now</div>' +
-      '<div class="sheet-list">' +
-        '<button type="button" class="btn btn-block" data-tool="demo">Load sample goals</button>' +
-        '<button type="button" class="btn btn-block btn-danger" data-tool="erase">Erase everything</button>' +
-      '</div>' +
-      '<div class="sheet-note">The real Settings screen arrives in Stage 5.</div>' +
-      '<div class="sheet-actions"><button type="button" class="btn" data-tool="close">Close</button></div>'
+// ----- Install hint, for a touch device that opened OneLife in the browser -----
+function installHint() {
+  const installed = navigator.standalone === true ||
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.matchMedia('(display-mode: fullscreen)').matches;
+  if (installed || !(navigator.maxTouchPoints > 0) || state.settings.installBannerDismissed) return;
+  const el = document.createElement('div');
+  el.className = 'install';
+  el.innerHTML = '<span>Add OneLife to your Home Screen to keep your goals: tap Share, then Add to Home Screen.</span>' +
+    '<button type="button" class="btn">Got it</button>';
+  el.querySelector('button').addEventListener('click', () => {
+    el.remove();
+    saveSettings({ installBannerDismissed: true }).catch(() => {});
   });
-  sheet.addEventListener('click', async (event) => {
-    const button = event.target.closest('[data-tool]');
-    if (!button) return;
-    const tool = button.dataset.tool;
-    try {
-      if (tool === 'demo') {
-        await loadDemo();
-        closeSheet();
-        toast('Sample goals loaded.');
-      } else if (tool === 'erase') {
-        if (!window.confirm('Erase all goals on this iPad?')) return;
-        await eraseAll();
-        closeSheet();
-        toast('Everything erased.');
-      } else {
-        closeSheet();
-      }
-    } catch (err) {
-      toast('That did not work. Try again.');
-    }
-  });
+  document.body.appendChild(el);
 }
 
 async function onReturn() {
-  if (document.hidden) return;
+  if (document.hidden) {
+    syncWakeLock();
+    return;
+  }
   try {
     await load();
     const res = await runDayClose();
     refreshBoard();
+    updateChrome();
+    syncWakeLock();
     awayPrompt(res);
   } catch (err) {
     console.error(err);
@@ -104,6 +172,7 @@ function scheduleMinuteTick() {
       if (!document.hidden) {
         await runDayClose();
         refreshBoard();
+        updateChrome();
       }
     } catch (err) {
       console.error(err);
@@ -125,15 +194,26 @@ async function boot() {
     onAdd: () => openGoalForm(null),
     onOpen: (id) => openGoalDetail(id),
     onTick: onTick,
-    onSettings: openTools,
-    onDone: () => toast('The Done screen arrives in Stage 5.')
+    onSettings: showSettings,
+    onDone: showDone
   });
-  subscribe(refreshBoard);
+  subscribe(() => {
+    refreshBoard();
+    updateChrome();
+    syncWakeLock();
+  });
   scheduleMinuteTick();
   document.addEventListener('visibilitychange', onReturn);
   window.addEventListener('pageshow', (event) => { if (event.persisted) onReturn(); });
   document.addEventListener('pointerdown', unlockAudio, { once: true });
+  document.addEventListener('pointerdown', touched);
+  touched();
+  updateChrome();
+  syncWakeLock();
+  installHint();
   awayPrompt(closed);
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  import('./done.js').catch(() => {});   // warm the Done screen for offline use
 }
 
 boot();
