@@ -1,7 +1,11 @@
-// OneLife: start-up and wiring. Stage 3, first half.
-import { load, runDayClose, addGoal, loadDemo, eraseAll, subscribe } from './store.js';
+// OneLife: start-up and wiring. Stage 4.
+import { load, runDayClose, loadDemo, eraseAll, subscribe } from './store.js';
 import { mountBoard, refreshBoard } from './board.js';
-import { toast, openSheet, closeSheet, esc } from './ui.js';
+import { openGoalForm } from './form.js';
+import { openGoalDetail } from './detail.js';
+import { performTick, excuseEntries } from './actions.js';
+import { act, unlockAudio } from './celebrate.js';
+import { toast, openSheet, closeSheet, sheetOpen, esc } from './ui.js';
 
 const app = document.getElementById('app');
 
@@ -15,38 +19,34 @@ function showFatal(err) {
   document.getElementById('retry').addEventListener('click', () => location.reload());
 }
 
-// Quick add: a title is enough. Opened from the + button, inside the tap, so the keyboard opens.
-function openQuickAdd() {
+// One tap, one action: ignore further ticks on the same goal for half a second.
+const busy = new Set();
+function onTick(id, action, el) {
+  if (!action || busy.has(id)) return;
+  busy.add(id);
+  setTimeout(() => busy.delete(id), 500);
+  act(() => performTick(id, action.kind), el);
+}
+
+// After three or more days away, offer to excuse what was missed.
+function awayPrompt(res) {
+  if (!res || res.closedDays.length < 3 || !res.entries.length || sheetOpen()) return;
+  const ids = res.entries.map((e) => e.id);
   const sheet = openSheet({
     html:
-      '<form id="quick-form" autocomplete="off">' +
-        '<div class="sheet-title">New goal</div>' +
-        '<input class="input input-title" id="quick-title" type="text" maxlength="80" ' +
-          'placeholder="What is the goal?" enterkeyhint="done">' +
-        '<div class="sheet-note">Dates, time slots, steps and numbers come with the full form in the next step.</div>' +
-        '<div class="sheet-actions">' +
-          '<button type="button" class="btn" id="quick-cancel">Cancel</button>' +
-          '<button type="submit" class="btn btn-primary" id="quick-save" disabled>Save</button>' +
-        '</div>' +
-      '</form>'
+      '<div class="sheet-title">You were away for ' + res.closedDays.length + ' days</div>' +
+      '<div class="sheet-note">' + ids.length + (ids.length === 1 ? ' session was' : ' sessions were') +
+        ' missed in that time.</div>' +
+      '<div class="sheet-actions">' +
+        '<button type="button" class="btn" data-away="keep">Keep them as missed</button>' +
+        '<button type="button" class="btn btn-primary" data-away="excuse">Excuse those days</button>' +
+      '</div>'
   });
-  const input = sheet.querySelector('#quick-title');
-  const save = sheet.querySelector('#quick-save');
-  input.focus();
-  input.addEventListener('input', () => { save.disabled = !input.value.trim(); });
-  sheet.querySelector('#quick-cancel').addEventListener('click', () => closeSheet());
-  sheet.querySelector('#quick-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const title = input.value.trim();
-    if (!title) return;
-    save.disabled = true;
-    try {
-      await addGoal({ title: title });
-      closeSheet();
-    } catch (err) {
-      save.disabled = false;
-      toast('Could not save. Try again.');
-    }
+  sheet.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-away]');
+    if (!button) return;
+    closeSheet();
+    if (button.dataset.away === 'excuse') act(() => excuseEntries(ids), null);
   });
 }
 
@@ -89,8 +89,9 @@ async function onReturn() {
   if (document.hidden) return;
   try {
     await load();
-    await runDayClose();
+    const res = await runDayClose();
     refreshBoard();
+    awayPrompt(res);
   } catch (err) {
     console.error(err);
   }
@@ -112,24 +113,27 @@ function scheduleMinuteTick() {
 }
 
 async function boot() {
+  let closed = null;
   try {
     await load();
-    await runDayClose();
+    closed = await runDayClose();
   } catch (err) {
     showFatal(err);
     return;
   }
   mountBoard(app, {
-    onAdd: openQuickAdd,
+    onAdd: () => openGoalForm(null),
+    onOpen: (id) => openGoalDetail(id),
+    onTick: onTick,
     onSettings: openTools,
-    onDone: () => toast('The Done screen arrives in Stage 5.'),
-    onTick: () => toast('Ticking arrives in Stage 4.'),
-    onOpen: () => toast('Goal details arrive in Stage 4.')
+    onDone: () => toast('The Done screen arrives in Stage 5.')
   });
   subscribe(refreshBoard);
   scheduleMinuteTick();
   document.addEventListener('visibilitychange', onReturn);
   window.addEventListener('pageshow', (event) => { if (event.persisted) onReturn(); });
+  document.addEventListener('pointerdown', unlockAudio, { once: true });
+  awayPrompt(closed);
 }
 
 boot();
