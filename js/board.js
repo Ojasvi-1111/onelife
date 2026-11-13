@@ -9,6 +9,7 @@ import { urgency, neonLook } from './urgency.js';
 import { layout, FLOOR_W } from './layout.js';
 import { esc, nums } from './ui.js';
 import { icon } from './icons.js';
+import { hasInk, inkSVG } from './ink.js';
 
 const boxes = new Map();   // goal id -> box element
 let views = new Map();     // goal id -> what the box shows
@@ -206,6 +207,14 @@ function fit(row, avail, w) {
   return textWidth(row.long, px) <= avail ? row.long : row.short;
 }
 
+// The title: your handwriting when the goal has it, otherwise the typed name.
+function titleHTML(goal) {
+  if (hasInk(goal.inkTitle)) {
+    return '<div class="box-title box-ink">' + inkSVG(goal.inkTitle, { label: goal.title }) + '</div>';
+  }
+  return '<div class="box-title">' + esc(goal.title) + '</div>';
+}
+
 function boxInner(goal, v, w) {
   const tier = w >= 320 ? 3 : w >= 230 ? 2 : 1;
   const showProgress = tier >= 2 && !!v.progress;
@@ -227,7 +236,7 @@ function boxInner(goal, v, w) {
     mid += '<div class="box-strip">' + v.strip.map((s) => '<i class="d-' + s + '"></i>').join('') + '</div>';
   }
   return '<div class="box-tag"></div>' +
-    '<div class="box-title">' + esc(goal.title) + '</div>' +
+    titleHTML(goal) +
     (mid ? '<div class="box-mid">' + mid + '</div>' : '') +
     '<div class="box-foot">' +
       '<div class="box-status' + (first && first.hot ? ' hot' : '') + '">' +
