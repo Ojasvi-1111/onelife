@@ -1,0 +1,113 @@
+/* Goal detail and the "goal finished" card. */
+#toast { z-index: 90; }
+
+.detail-head { display: flex; align-items: flex-start; gap: 14px; }
+.detail-tag { flex: none; width: 4px; align-self: stretch; min-height: 36px; border-radius: 1px; background: var(--tag); }
+.detail-title { flex: 1 1 auto; min-width: 0; font-size: 30px; font-weight: 200; line-height: 1.15; overflow-wrap: break-word; }
+.detail-sub { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 16px; color: var(--text-2); }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.pill { padding: 5px 10px; border: 1px solid var(--hair-2); border-radius: var(--radius); font-size: 15px; color: var(--text-2); }
+.pill.hot { border-color: color-mix(in srgb, var(--red) 70%, transparent); color: var(--red-text); }
+.pill.hot .n { color: var(--red-text); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+.steptick {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 17px;
+  text-align: left;
+}
+.steptick i {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--hair-2);
+  border-radius: 2px;
+  color: transparent;
+}
+.steptick .icon { width: 18px; height: 18px; }
+.steptick.is-on i {
+  border-color: var(--green);
+  color: var(--green-core);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--green) 60%, transparent);
+}
+.steptick.is-on span { color: var(--text-2); }
+
+.bignum { display: flex; align-items: baseline; gap: 10px; }
+.bignum b { font-family: var(--font-num); font-weight: 700; font-size: 44px; line-height: 1; }
+.bignum span { font-size: 17px; color: var(--text-2); }
+.bar-line { position: relative; height: 4px; margin-top: 12px; background: var(--hair-2); }
+.bar-line b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); box-shadow: 0 0 8px var(--green); }
+
+.inline { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.inline .input { flex: 1 1 160px; width: auto; min-width: 0; min-height: 48px; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.stat { padding: 12px; border: 1px solid var(--hair); border-radius: var(--radius); background: var(--void); }
+.stat-num { font-family: var(--font-num); font-weight: 700; font-size: 26px; line-height: 1.1; }
+.stat-num.hot { color: var(--red-text); }
+.stat-label { margin-top: 4px; font-size: 14px; color: var(--text-2); }
+
+.strip14 { gap: 6px; margin-bottom: 12px; }
+.strip14 i { width: 14px; height: 14px; }
+.hrow { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 4px 0; border-top: 1px solid var(--hair); }
+.hrow-day { flex: none; width: 108px; font-size: 15px; color: var(--text-2); }
+.hrow-what { flex: 1 1 auto; min-width: 0; font-size: 16px; overflow-wrap: break-word; }
+.hrow-what.hot, .hrow-what.hot .n { color: var(--red-text); }
+.hrow .btn { min-height: 44px; padding: 0 12px; font-size: 15px; }
+.hrow .icon-btn { width: 44px; height: 44px; }
+.hrow .input { flex: none; width: 96px; min-height: 44px; }
+
+.detail-notes { white-space: pre-wrap; overflow-wrap: break-word; font-size: 16px; }
+
+/* Goal finished: a neon sign in the middle of the screen */
+.finish {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+}
+.finish-card {
+  max-width: min(720px, 100%);
+  padding: 36px 40px;
+  border: 1.5px solid var(--green);
+  border-radius: var(--radius);
+  background: var(--void);
+  text-align: center;
+  box-shadow:
+    0 0 8px var(--green),
+    0 0 40px color-mix(in srgb, var(--green) 55%, transparent),
+    inset 0 0 24px color-mix(in srgb, var(--green) 18%, transparent);
+}
+.finish-label { font-size: 17px; color: var(--green-soft); }
+.finish-title {
+  margin-top: 10px;
+  font-size: clamp(32px, 5vw, 56px);
+  font-weight: 200;
+  line-height: 1.1;
+  color: var(--green-core);
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.9), 0 0 10px var(--green), 0 0 28px var(--green);
+  overflow-wrap: break-word;
+}
+.finish-totals {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 22px;
+  margin-top: 18px;
+  font-size: 17px;
+  color: var(--text-2);
+}
