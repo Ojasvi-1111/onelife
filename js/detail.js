@@ -10,6 +10,7 @@ import { boardContext, goalView } from './board.js';
 import { esc, nums, openSheet, closeSheet, toast } from './ui.js';
 import { icon } from './icons.js';
 import { openGoalForm } from './form.js';
+import { hasInk, inkSVG, openInkPad } from './ink.js';
 
 const ORDER = [1, 2, 3, 4, 5, 6, 0];
 const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -121,9 +122,14 @@ function detailHTML(goal, ui) {
   const btn = (what, label, extra) =>
     '<button type="button" class="btn' + (extra || '') + '" data-do="' + what + '">' + label + '</button>';
 
+  // The title: your handwriting when the goal has it, otherwise the typed name.
+  const title = hasInk(goal.inkTitle)
+    ? '<div class="detail-title" style="height:76px">' +
+      inkSVG(goal.inkTitle, { label: goal.title, stroke: 2.6 }) + '</div>'
+    : '<div class="detail-title">' + esc(goal.title) + '</div>';
+
   let h = '<div class="form-head detail-head" style="--tag:var(--t' + (goal.color % 8) + ')">' +
-    '<div class="detail-tag"></div>' +
-    '<div class="detail-title">' + esc(goal.title) + '</div>' +
+    '<div class="detail-tag"></div>' + title +
     '<button type="button" class="icon-btn" data-do="close" aria-label="Close">' + icon('close') + '</button>' +
     '</div><div class="form-body">';
 
@@ -224,6 +230,16 @@ function detailHTML(goal, ui) {
       '</form></section>';
   }
 
+  // Notes, typed and handwritten
+  h += '<section class="fsec"><div class="fsec-label">Notes</div>' +
+    (goal.notes ? '<div class="detail-notes">' + esc(goal.notes) + '</div>' : '') +
+    (hasInk(goal.inkNote)
+      ? '<div class="ink-preview tall" style="height:260px">' +
+        inkSVG(goal.inkNote, { label: 'Handwritten note', stroke: 2.4 }) + '</div>' +
+        '<div class="ink-row">' + btn('inknote', 'Edit handwriting') + btn('inknote-remove', 'Remove handwriting') + '</div>'
+      : '<div class="ink-row">' + btn('inknote', 'Write a note by hand') + '</div>') +
+    '</section>';
+
   // History
   const list = ge.slice().sort((a, b) => (
     a.day < b.day ? 1 : a.day > b.day ? -1 : a.at < b.at ? 1 : a.at > b.at ? -1 : 0
@@ -246,11 +262,6 @@ function detailHTML(goal, ui) {
       '<button type="submit" class="btn">Log a past day as done</button></form>';
   }
   h += '</section>';
-
-  if (goal.notes) {
-    h += '<section class="fsec"><div class="fsec-label">Notes</div>' +
-      '<div class="detail-notes">' + esc(goal.notes) + '</div></section>';
-  }
 
   h += '</div><div class="form-foot">' +
     btn('delete', 'Delete', ' btn-danger') + btn('drop', 'Drop') +
@@ -327,6 +338,23 @@ export function openGoalDetail(goalId) {
     }
     if (what === 'canceledit') { ui.editing = ''; render(); return; }
     if (what === 'more') { ui.showAll = true; render(); return; }
+    if (what === 'inknote') {
+      const goal = getGoal(goalId);
+      if (!goal) return;
+      openInkPad({
+        title: 'Handwritten note', hint: 'Write your note here', w: 4, h: 3, ink: goal.inkNote,
+        onSave: (ink) => {
+          updateGoal(goalId, { inkNote: ink }).catch(() => toast('Could not save. Try again.'));
+        }
+      });
+      return;
+    }
+    if (what === 'inknote-remove') {
+      if (!window.confirm('Remove the handwritten note?')) return;
+      try { await updateGoal(goalId, { inkNote: null }); }
+      catch (err) { toast('Could not save. Try again.'); }
+      return;
+    }
     if (what === 'edit') { closeSheet(); openGoalForm(goalId); return; }
     if (what === 'drop') {
       if (window.confirm('Drop this goal? Its past wins are kept.')) await act(() => A.dropGoal(goalId), t);
